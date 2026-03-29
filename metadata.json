@@ -1,0 +1,5 @@
+{
+  "name": "Gemini Video Studio",
+  "description": "Generate high-quality 4K-style videos from images using Gemini Veo.",
+  "requestFramePermissions": []
+}
