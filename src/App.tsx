@@ -1,299 +1,504 @@
-import { FormEvent, useMemo, useState } from 'react';
-import { Camera, DollarSign, ImagePlus, ShieldCheck, ShoppingBag, Store, Upload } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Eye,
+  Heart,
+  MessageCircle,
+  Music2,
+  Pause,
+  Play,
+  Shield,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react';
 
-type Listing = {
-  id: number;
-  title: string;
-  category: string;
-  price: number;
-  license: string;
-  image: string;
-  status: 'Live' | 'Draft';
-  sales: number;
+type Comment = {
+  id: string;
+  username: string;
+  avatar: string;
+  text: string;
+  createdAt: string;
 };
 
-const starterListings: Listing[] = [
+type Photo = {
+  id: string;
+  title: string;
+  imageUrl: string;
+  likes: number;
+  views: number;
+  comments: Comment[];
+  createdAt: string;
+};
+
+type MusicTrack = {
+  id: string;
+  name: string;
+  url: string;
+};
+
+const STORAGE_KEY = 'xax-state-v1';
+const ADMIN_PASSWORD = 'xax-admin-2026';
+const HERO_SNAKE_IMAGE =
+  'https://images.unsplash.com/photo-1531386151447-fd76ad50012f?auto=format&fit=crop&w=1600&q=80';
+
+type StoredState = {
+  photos: Photo[];
+  tracks: MusicTrack[];
+  selectedTrackId: string;
+};
+
+const initialPhotos: Photo[] = [
   {
-    id: 1,
-    title: 'Golden Desert Dawn',
-    price: 45,
-    category: 'Landscape',
-    license: 'Commercial license',
-    image:
-      'https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=1200&q=80',
-    status: 'Live',
-    sales: 18,
+    id: 'p-1',
+    title: 'Crimson Gaze',
+    imageUrl:
+      'https://images.unsplash.com/photo-1526336024174-e58f5cdd8e13?auto=format&fit=crop&w=1200&q=80',
+    likes: 214,
+    views: 1820,
+    createdAt: new Date().toISOString(),
+    comments: [
+      {
+        id: 'c-1',
+        username: 'Nyx',
+        avatar: 'https://api.dicebear.com/9.x/bottts/svg?seed=Nyx',
+        text: 'This glow is unreal 🔥',
+        createdAt: new Date().toISOString(),
+      },
+    ],
   },
   {
-    id: 2,
-    title: 'City Rain Reflection',
-    price: 60,
-    category: 'Street',
-    license: 'Editorial use',
-    image:
-      'https://images.unsplash.com/photo-1514565131-fce0801e5785?auto=format&fit=crop&w=1200&q=80',
-    status: 'Live',
-    sales: 12,
-  },
-  {
-    id: 3,
-    title: 'Vintage Portrait Light',
-    price: 55,
-    category: 'Portrait',
-    license: 'Commercial license',
-    image:
-      'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=1200&q=80',
-    status: 'Draft',
-    sales: 0,
+    id: 'p-2',
+    title: 'Obsidian Coil',
+    imageUrl:
+      'https://images.unsplash.com/photo-1538428494232-9c0f8a6f2e06?auto=format&fit=crop&w=1200&q=80',
+    likes: 128,
+    views: 995,
+    createdAt: new Date().toISOString(),
+    comments: [],
   },
 ];
 
-export default function App() {
-  const [listings, setListings] = useState<Listing[]>(starterListings);
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Landscape');
-  const [price, setPrice] = useState('39');
-  const [license, setLicense] = useState('Commercial license');
-  const [image, setImage] = useState('');
-  const [search, setSearch] = useState('');
+const initialTracks: MusicTrack[] = [
+  {
+    id: 'm-1',
+    name: 'Dark Ambient Pulse',
+    url: 'https://cdn.pixabay.com/download/audio/2022/02/10/audio_0f6f3b4e39.mp3?filename=dark-ambient-110843.mp3',
+  },
+];
 
-  const metrics = useMemo(() => {
-    const photosListed = listings.length;
-    const totalSales = listings.reduce((sum, listing) => sum + listing.sales, 0);
-    const revenue = listings.reduce((sum, listing) => sum + listing.sales * listing.price, 0);
-    const liveCount = listings.filter((listing) => listing.status === 'Live').length;
+function formatTime(iso: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(iso));
+}
 
-    return { photosListed, totalSales, revenue, liveCount };
-  }, [listings]);
+function loadState(): StoredState {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) {
+    return { photos: initialPhotos, tracks: initialTracks, selectedTrackId: initialTracks[0].id };
+  }
 
-  const filteredListings = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) {
-      return listings;
+  try {
+    const parsed = JSON.parse(raw) as StoredState;
+    if (!parsed.photos?.length || !parsed.tracks?.length || !parsed.selectedTrackId) {
+      return { photos: initialPhotos, tracks: initialTracks, selectedTrackId: initialTracks[0].id };
     }
 
-    return listings.filter(
-      (listing) =>
-        listing.title.toLowerCase().includes(query) ||
-        listing.category.toLowerCase().includes(query) ||
-        listing.license.toLowerCase().includes(query),
-    );
-  }, [listings, search]);
+    return parsed;
+  } catch {
+    return { photos: initialPhotos, tracks: initialTracks, selectedTrackId: initialTracks[0].id };
+  }
+}
 
-  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+export default function App() {
+  const [isLoading, setIsLoading] = useState(true);
+  const [cursor, setCursor] = useState({ x: -200, y: -200 });
+  const [parallaxOffset, setParallaxOffset] = useState({ x: 0, y: 0 });
 
-    if (!title.trim() || !price || Number(price) <= 0) {
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [musicOn, setMusicOn] = useState(true);
+
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [tracks, setTracks] = useState<MusicTrack[]>([]);
+  const [selectedTrackId, setSelectedTrackId] = useState('');
+  const [previewPhotoId, setPreviewPhotoId] = useState<string | null>(null);
+
+  const [photoTitle, setPhotoTitle] = useState('');
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [trackName, setTrackName] = useState('');
+  const [trackUrl, setTrackUrl] = useState('');
+  const [commentDraft, setCommentDraft] = useState<Record<string, string>>({});
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setIsLoading(false), 1700);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
+    const state = loadState();
+    setPhotos(state.photos);
+    setTracks(state.tracks);
+    setSelectedTrackId(state.selectedTrackId);
+  }, []);
+
+  useEffect(() => {
+    if (!tracks.length || !selectedTrackId) {
       return;
     }
 
-    const defaultImage =
-      'https://images.unsplash.com/photo-1474302770737-173ee21bab63?auto=format&fit=crop&w=1200&q=80';
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        photos,
+        tracks,
+        selectedTrackId,
+      }),
+    );
+  }, [photos, tracks, selectedTrackId]);
 
-    const newListing: Listing = {
-      id: Date.now(),
-      title: title.trim(),
-      category,
-      price: Number(price),
-      license,
-      image: image.trim() || defaultImage,
-      status: 'Live',
-      sales: 0,
+  const selectedTrack = useMemo(
+    () => tracks.find((track) => track.id === selectedTrackId) ?? tracks[0],
+    [tracks, selectedTrackId],
+  );
+
+  useEffect(() => {
+    if (!selectedTrack) {
+      return;
+    }
+
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    audio.src = selectedTrack.url;
+    audio.loop = true;
+    audio.volume = 0;
+
+    if (musicOn) {
+      void audio.play().catch(() => undefined);
+      fadeAudio(audio, 0.25);
+    }
+  }, [selectedTrack, musicOn]);
+
+  useEffect(() => {
+    const onMove = (event: MouseEvent) => {
+      setCursor({ x: event.clientX, y: event.clientY });
+      setParallaxOffset({ x: (event.clientX - window.innerWidth / 2) / 50, y: event.clientY / 80 });
     };
 
-    setListings((previous) => [newListing, ...previous]);
-    setTitle('');
-    setCategory('Landscape');
-    setPrice('39');
-    setLicense('Commercial license');
-    setImage('');
+    window.addEventListener('mousemove', onMove);
+    return () => window.removeEventListener('mousemove', onMove);
+  }, []);
+
+  const toggleMusic = () => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    if (musicOn) {
+      fadeAudio(audio, 0, () => {
+        audio.pause();
+        setMusicOn(false);
+      });
+      return;
+    }
+
+    void audio.play().catch(() => undefined);
+    setMusicOn(true);
+    fadeAudio(audio, 0.25);
   };
 
+  const loginAdmin = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (adminPassword === ADMIN_PASSWORD) {
+      setIsAdmin(true);
+      setAdminPassword('');
+    }
+  };
+
+  const addPhoto = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!isAdmin || !photoTitle.trim() || !photoUrl.trim()) {
+      return;
+    }
+
+    setPhotos((prev) => [
+      {
+        id: crypto.randomUUID(),
+        title: photoTitle.trim(),
+        imageUrl: photoUrl.trim(),
+        likes: 0,
+        views: 0,
+        comments: [],
+        createdAt: new Date().toISOString(),
+      },
+      ...prev,
+    ]);
+    setPhotoTitle('');
+    setPhotoUrl('');
+  };
+
+  const addTrack = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!isAdmin || !trackName.trim() || !trackUrl.trim()) {
+      return;
+    }
+
+    const newTrack = {
+      id: crypto.randomUUID(),
+      name: trackName.trim(),
+      url: trackUrl.trim(),
+    };
+
+    setTracks((prev) => [newTrack, ...prev]);
+    setSelectedTrackId(newTrack.id);
+    setTrackName('');
+    setTrackUrl('');
+  };
+
+  const deleteTrack = (id: string) => {
+    if (!isAdmin || tracks.length === 1) {
+      return;
+    }
+
+    const updated = tracks.filter((track) => track.id !== id);
+    setTracks(updated);
+    if (id === selectedTrackId) {
+      setSelectedTrackId(updated[0].id);
+    }
+  };
+
+  const openPreview = (id: string) => {
+    setPhotos((prev) => prev.map((photo) => (photo.id === id ? { ...photo, views: photo.views + 1 } : photo)));
+    setPreviewPhotoId(id);
+  };
+
+  const likePhoto = (id: string) => {
+    setPhotos((prev) => prev.map((photo) => (photo.id === id ? { ...photo, likes: photo.likes + 1 } : photo)));
+  };
+
+  const addComment = (photoId: string) => {
+    const text = (commentDraft[photoId] ?? '').trim();
+    if (!text) {
+      return;
+    }
+
+    setPhotos((prev) =>
+      prev.map((photo) =>
+        photo.id === photoId
+          ? {
+              ...photo,
+              comments: [
+                {
+                  id: crypto.randomUUID(),
+                  username: 'Guest',
+                  avatar: 'https://api.dicebear.com/9.x/bottts/svg?seed=Guest',
+                  text,
+                  createdAt: new Date().toISOString(),
+                },
+                ...photo.comments,
+              ],
+            }
+          : photo,
+      ),
+    );
+
+    setCommentDraft((prev) => ({ ...prev, [photoId]: '' }));
+  };
+
+  const deleteComment = (photoId: string, commentId: string) => {
+    if (!isAdmin) {
+      return;
+    }
+
+    setPhotos((prev) =>
+      prev.map((photo) =>
+        photo.id === photoId
+          ? { ...photo, comments: photo.comments.filter((comment) => comment.id !== commentId) }
+          : photo,
+      ),
+    );
+  };
+
+  const previewPhoto = photos.find((photo) => photo.id === previewPhotoId) ?? null;
+  const totalLikes = photos.reduce((sum, photo) => sum + photo.likes, 0);
+  const totalViews = photos.reduce((sum, photo) => sum + photo.views, 0);
+  const totalComments = photos.reduce((sum, photo) => sum + photo.comments.length, 0);
+
+  if (isLoading) {
+    return (
+      <div className="loading-screen">
+        <p className="loading-logo">XaX</p>
+        <p className="loading-text">Calibrating the serpent eye…</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <header className="border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-            <Camera className="h-5 w-5 text-amber-400" />
-            SnapMarket
-          </div>
-          <button className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-semibold hover:border-zinc-500">
-            Creator dashboard
-          </button>
-        </div>
+    <div className="app-shell">
+      <audio ref={audioRef} preload="auto" />
+      <div className="cursor-glow" style={{ left: cursor.x, top: cursor.y }} />
+      <div className="smoke-bg" />
+
+      <header className="top-bar">
+        <h1>XaX</h1>
+        <button className="music-btn" onClick={toggleMusic}>
+          <Music2 size={16} /> {musicOn ? 'Music ON' : 'Music OFF'} {musicOn ? <Pause size={14} /> : <Play size={14} />}
+        </button>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-10 px-6 py-10 lg:grid-cols-[380px_1fr]">
-        <section className="h-fit rounded-3xl border border-zinc-800 bg-zinc-900/40 p-6">
-          <p className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-1 text-xs uppercase tracking-widest text-zinc-300">
-            <Store className="h-3.5 w-3.5 text-amber-400" />
-            Sell your photos
-          </p>
-          <h1 className="text-2xl font-bold">Create a new listing</h1>
-          <p className="mt-2 text-sm text-zinc-400">
-            Post your photo, set a price, and publish instantly so buyers can purchase digital downloads.
-          </p>
+      <section className="hero" style={{ transform: `translate3d(${parallaxOffset.x}px, ${parallaxOffset.y}px, 0)` }}>
+        <img src={HERO_SNAKE_IMAGE} alt="Black snake with glowing red eyes" />
+        <div className="hero-overlay" />
+        <div className="hero-copy">
+          <p className="eyebrow">Cinematic • Mysterious • Premium</p>
+          <h2>The Eye of XaX</h2>
+          <p>Enter an ultra-dark gallery where every frame glows in crimson neon and motion breathes in the shadows.</p>
+        </div>
+      </section>
 
-          <form className="mt-6 space-y-4" onSubmit={onSubmit}>
-            <label className="block text-sm">
-              <span className="mb-1.5 block text-zinc-300">Photo title</span>
-              <input
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none ring-amber-400 placeholder:text-zinc-500 focus:ring-2"
-                placeholder="e.g. Snowy mountain sunrise"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-              />
-            </label>
+      <section className="analytics">
+        <article><Heart size={16} /> {totalLikes} Likes</article>
+        <article><Eye size={16} /> {totalViews} Views</article>
+        <article><MessageCircle size={16} /> {totalComments} Comments</article>
+      </section>
 
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block text-sm">
-                <span className="mb-1.5 block text-zinc-300">Category</span>
-                <select
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
-                  value={category}
-                  onChange={(event) => setCategory(event.target.value)}
-                >
-                  <option>Landscape</option>
-                  <option>Street</option>
-                  <option>Portrait</option>
-                  <option>Nature</option>
-                  <option>Travel</option>
-                </select>
-              </label>
-
-              <label className="block text-sm">
-                <span className="mb-1.5 block text-zinc-300">Price (USD)</span>
-                <input
-                  type="number"
-                  min="1"
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
-                  value={price}
-                  onChange={(event) => setPrice(event.target.value)}
-                />
-              </label>
-            </div>
-
-            <label className="block text-sm">
-              <span className="mb-1.5 block text-zinc-300">License</span>
-              <select
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
-                value={license}
-                onChange={(event) => setLicense(event.target.value)}
-              >
-                <option>Commercial license</option>
-                <option>Editorial use</option>
-                <option>Personal use</option>
-              </select>
-            </label>
-
-            <label className="block text-sm">
-              <span className="mb-1.5 block text-zinc-300">Image URL (optional)</span>
-              <input
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none ring-amber-400 placeholder:text-zinc-500 focus:ring-2"
-                placeholder="https://..."
-                value={image}
-                onChange={(event) => setImage(event.target.value)}
-              />
-            </label>
-
-            <button
-              type="submit"
-              className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-4 py-2.5 text-sm font-semibold text-zinc-900 hover:bg-amber-300"
-            >
-              <Upload className="h-4 w-4" /> Publish listing
+      <section className="gallery-grid">
+        {photos.map((photo) => (
+          <article key={photo.id} className="photo-card">
+            <button className="photo-trigger" onClick={() => openPreview(photo.id)}>
+              <img src={photo.imageUrl} alt={photo.title} loading="lazy" />
+              <div className="photo-title">{photo.title}</div>
             </button>
-          </form>
-        </section>
 
-        <section className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <article className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-              <p className="text-xs uppercase tracking-wide text-zinc-400">Photos listed</p>
-              <p className="mt-2 text-2xl font-bold">{metrics.photosListed}</p>
-            </article>
-            <article className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-              <p className="text-xs uppercase tracking-wide text-zinc-400">Live listings</p>
-              <p className="mt-2 text-2xl font-bold">{metrics.liveCount}</p>
-            </article>
-            <article className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-              <p className="text-xs uppercase tracking-wide text-zinc-400">Total sales</p>
-              <p className="mt-2 flex items-center gap-1 text-2xl font-bold">
-                <ShoppingBag className="h-4 w-4 text-amber-400" />
-                {metrics.totalSales}
-              </p>
-            </article>
-            <article className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-              <p className="text-xs uppercase tracking-wide text-zinc-400">Revenue</p>
-              <p className="mt-2 flex items-center gap-1 text-2xl font-bold">
-                <DollarSign className="h-4 w-4 text-amber-400" />
-                {metrics.revenue.toLocaleString()}
-              </p>
-            </article>
-          </div>
-
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-xl font-semibold">Marketplace listings</h2>
-              <input
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none ring-amber-400 placeholder:text-zinc-500 focus:ring-2 sm:w-64"
-                placeholder="Search title, category, license"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
+            <div className="photo-actions">
+              <button onClick={() => likePhoto(photo.id)}><Heart size={15} /> {photo.likes}</button>
+              <span><Eye size={15} /> {photo.views}</span>
+              <span><MessageCircle size={15} /> {photo.comments.length}</span>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filteredListings.map((listing) => (
-                <article key={listing.id} className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950/60">
-                  <img src={listing.image} alt={listing.title} className="h-44 w-full object-cover" loading="lazy" />
-                  <div className="space-y-3 p-4">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="font-semibold">{listing.title}</h3>
-                        <p className="text-xs text-zinc-400">{listing.category}</p>
-                      </div>
-                      <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300">
-                        {listing.status}
-                      </span>
-                    </div>
-                    <p className="text-sm text-zinc-400">{listing.license}</p>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-semibold text-amber-400">${listing.price}</span>
-                      <span className="text-zinc-400">{listing.sales} sales</span>
-                    </div>
+            <div className="comment-box">
+              <input
+                placeholder="Drop a comment..."
+                value={commentDraft[photo.id] ?? ''}
+                onChange={(event) =>
+                  setCommentDraft((prev) => ({
+                    ...prev,
+                    [photo.id]: event.target.value,
+                  }))
+                }
+              />
+              <button onClick={() => addComment(photo.id)}>Post</button>
+            </div>
+
+            <div className="comment-list">
+              {photo.comments.slice(0, 3).map((comment) => (
+                <div key={comment.id} className="comment-item">
+                  <img src={comment.avatar} alt={comment.username} />
+                  <div>
+                    <p>
+                      <strong>{comment.username}</strong> · <span>{formatTime(comment.createdAt)}</span>
+                    </p>
+                    <p>{comment.text}</p>
                   </div>
-                </article>
+                  {isAdmin ? (
+                    <button className="trash" onClick={() => deleteComment(photo.id, comment.id)}>
+                      <Trash2 size={13} />
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
+      </section>
+
+      <section className="admin-panel">
+        <h3><Shield size={16} /> Admin Panel</h3>
+
+        {!isAdmin ? (
+          <form onSubmit={loginAdmin} className="admin-login">
+            <input
+              type="password"
+              placeholder="Admin password"
+              value={adminPassword}
+              onChange={(event) => setAdminPassword(event.target.value)}
+            />
+            <button type="submit">Secure Login</button>
+          </form>
+        ) : (
+          <div className="admin-tools">
+            <form onSubmit={addPhoto}>
+              <p>Upload Image</p>
+              <input placeholder="Photo title" value={photoTitle} onChange={(event) => setPhotoTitle(event.target.value)} />
+              <input placeholder="Image URL" value={photoUrl} onChange={(event) => setPhotoUrl(event.target.value)} />
+              <button type="submit"><Upload size={14} /> Add Photo</button>
+            </form>
+
+            <form onSubmit={addTrack}>
+              <p>Upload Music</p>
+              <input placeholder="Track name" value={trackName} onChange={(event) => setTrackName(event.target.value)} />
+              <input placeholder="Track URL" value={trackUrl} onChange={(event) => setTrackUrl(event.target.value)} />
+              <button type="submit"><Upload size={14} /> Add Track</button>
+            </form>
+
+            <div className="track-list">
+              <p>Manage Tracks</p>
+              {tracks.map((track) => (
+                <div key={track.id}>
+                  <button onClick={() => setSelectedTrackId(track.id)}>{track.name}</button>
+                  <button onClick={() => deleteTrack(track.id)}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               ))}
             </div>
 
-            {filteredListings.length === 0 ? (
-              <p className="mt-5 rounded-lg border border-dashed border-zinc-700 p-5 text-sm text-zinc-400">
-                No listings matched your search.
-              </p>
-            ) : null}
+            <div className="danger-zone">
+              <p>Image moderation</p>
+              {photos.map((photo) => (
+                <div key={photo.id}>
+                  <span>{photo.title}</span>
+                  <button onClick={() => setPhotos((prev) => prev.filter((item) => item.id !== photo.id))}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
+        )}
+      </section>
 
-          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 text-sm text-zinc-300">
-            <p className="mb-2 inline-flex items-center gap-2 font-semibold">
-              <ImagePlus className="h-4 w-4 text-amber-400" /> Tips for higher conversions
-            </p>
-            <ul className="list-inside list-disc space-y-1 text-zinc-400">
-              <li>Use descriptive titles with location or mood keywords.</li>
-              <li>Keep preview images bright, sharp, and watermark-free.</li>
-              <li>Offer both commercial and editorial licenses for flexibility.</li>
-            </ul>
-          </div>
-        </section>
-      </main>
-
-      <footer className="border-t border-zinc-800">
-        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-6 py-6 text-sm text-zinc-400 md:flex-row md:items-center md:justify-between">
-          <p>© 2026 SnapMarket. Built for photographers.</p>
-          <p className="flex items-center gap-1">
-            <ShieldCheck className="h-4 w-4 text-emerald-400" /> Secure checkout & protected downloads
-          </p>
+      {previewPhoto ? (
+        <div className="preview-modal" onClick={() => setPreviewPhotoId(null)}>
+          <button className="close-btn"><X size={20} /></button>
+          <img src={previewPhoto.imageUrl} alt={previewPhoto.title} />
+          <p>{previewPhoto.title}</p>
         </div>
-      </footer>
+      ) : null}
     </div>
   );
+}
+
+function fadeAudio(audio: HTMLAudioElement, target: number, onDone?: () => void) {
+  const step = target > audio.volume ? 0.02 : -0.02;
+  const timer = window.setInterval(() => {
+    const next = Number((audio.volume + step).toFixed(2));
+    const reached = step > 0 ? next >= target : next <= target;
+
+    if (reached) {
+      audio.volume = target;
+      window.clearInterval(timer);
+      onDone?.();
+      return;
+    }
+
+    audio.volume = Math.max(0, Math.min(1, next));
+  }, 60);
 }
